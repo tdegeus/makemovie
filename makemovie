@@ -1,532 +1,209 @@
 #!/usr/bin/env python3
+"""makemovie
+  Convert a batch of images to a movie. The program automatically recognizes the storage-format and
+  renumbers it such that "ffmpeg" can deal with it. There are a bunch of (automatic) conversion
+  possibilities. It is also possible to apply (some of) these conversions without generating a
+  movie.
 
-import argparse,os,sys,re
+  Note that this function does not apply any compression. It should be applied externally, e.g.:
+  Handbrake (mac).
+
+Usage:
+  makemovie [options] <image>...
+
+Arguments:
+  image                   The images which form the frames of the movie.
+
+Options:
+  -h --help               Show help.
+  --version               Show version.
+  -v --verbose            Print all executed commands.
+  -o --output=<str>       Filename of the output movie.
+  -t --time=<float>       Fix total time of the movie [default: 20].
+  -r --frame-rate=<float> Fix the frame rate (see "ffmpeg"), ignores "--time" option.
+  --background=<str>      Apply a background color (e.g. "none" or "white").
+  --trim                  Trim the images to the smallest size that fits all images.
+  --flatten               Flatten input images: required for transparent PNG-files.
+  --temp-dir=<str>        Output directory for temporary images (all are deleted if not specified).
+
+(c-MIT) T.W.J. de Geus | tom@geus.me | www.geus.me | github.com/tdegeus
+"""
+
+# ==================================================================================================
+
 from subprocess import check_output,STDOUT
+from docopt     import docopt
+import os,sys,re
+import shutil
+import tempfile
 
-# ==============================================================================
-# description
-# ==============================================================================
+# ==================================================================================================
+# support functions
+# ==================================================================================================
 
-# ------------------------------------------------------------------------------
+def exec_cmd(cmd,verbose=False):
 
-def printversion(parser):
-  print('''
-  Version 2.0, December 2016
+  if verbose: print(cmd)
 
-  - Converted implementation to Python.
-  - Changed input to list of images: automatic format extracting / renumbering.
-  - Allowed SVG input.
-
-  Version 1.0, 2015
-
-  - First implementation, features very simple ffmpeg front-end.
-  ''')
-  parser.exit(0)
-
-# ------------------------------------------------------------------------------
-
-def printhelp(parser):
-  print('''
-NAME
-
-  makemovie - convert a batch of images to a movie (and apply image conversion)
-
-USAGE
-
-  $ makemovie [OPTIONS] [-o MOVIENAME] IMAGE [IMAGE ...]
-
-DESCRIPTION
-
-  Convert a batch of images to a movie. The program automatically recognizes
-  the storage-format and renumbers it such that "ffmpeg" can deal with it. There
-  are a bunch of (automatic) conversion possibilities. It is also possible
-  to apply (some of) these conversions without generating a movie.
-
-OPTIONS
-
-  -o, --output STR
-    File-name of the output movie. No movie is generated if not set.
-    NB: do not specify an extension, as it depends on the operating system.
-
-  -r, --frame-rate FLOAT
-    Set frame rate (Hz value, fraction, or abbreviation; see "ffmpeg").
-    By default the frame rate is set such that the movie is 20 seconds.
-
-  --background STR
-    Apply a background color.
-    To have transparent color use "none"; by default "white" is used.
-
-  --trim
-    Trim the images to the smallest size that fits all images.
-
-  --flatten
-    Flatten input images: required for transparent PNG-files.
-
-  --temp-dir STR
-    Set temporary working directory. By default this program creates a directory
-    which is entirely removed when the program finishes.
-
-  --verbose
-    Verbose commands.
-
-COMPRESSION
-
-  This function creates a movie without any compression. To apply compression
-  different programs can be used. Suggestions:
-
-  - Handbrake (Mac OSx).
-
-COPYRIGHT
-
-  T.W.J. de Geus
-  tom@geus.me
-  www.geus.me
-  ''')
-  parser.exit(0)
-
-# ==============================================================================
-# external commands
-# ==============================================================================
-
-# ---------------------------------
-# emulate the Linux "which" command
-# ---------------------------------
-
-def which(program):
-  r'''
-Return absolute path to an executable.
-
-Arguments
-
--   *program (`<str>`)*
-    Name of the program (e.g. `'ffmpeg'`)
-
-Returns
-
--   *exec (`<str>` | `None`)*
-    Absolute path to the executable, or `None` if the program is not found.
-  '''
-
-  def is_exe(fpath):
-    return os.path.exists(fpath) and os.access(fpath, os.X_OK)
-
-  def ext_candidates(fpath):
-    yield fpath
-    for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
-      yield fpath + ext
-
-  fpath, fname = os.path.split(program)
-  if fpath:
-    if is_exe(program):
-      return program
-  else:
-    for path in os.environ["PATH"].split(os.pathsep):
-      exe_file = os.path.join(path, program)
-      for candidate in ext_candidates(exe_file):
-        if is_exe(candidate):
-          return candidate
-
-# --------------------------------
-# format command + execute/verbose
-# --------------------------------
-
-def exec_cmd(cmd,base_dir,temp_dir,**args):
-  r'''
-Apply print-format to a command, and then execute it.
-
-Arguments
-
--   *cmd (`<str>`)*
-    Command, possibly with print-format statements (e.g. `'mkdir {temp_dir:s}'`)
-
--   *verbose (`True` | `False)*
-    Verbose settings, if `True` the command and its output.
-
--   *base_dir, temp_dir (`<str>`)*
-    The base and temporary directory (used to abbreviate the verbose print).
-
-Options
-
--   *args (`<dict>`)*
-    Each of the substitutions to apply in the print format, as named arguments.
-
-Returns
-
--   *output*
-    Output of the command.
-  '''
-
-  cmd    = cmd.format(**args)
   output = check_output(cmd,shell=True,stderr=STDOUT).decode("utf-8")
 
-  if args['verbose']:
-
-    print(cmd.replace(temp_dir,'${temp_dir}').replace(base_dir,'${base_dir}'))
-
-    if len(output)>0:
-      print(output)
+  if verbose and len(output)>0: print(output)
 
   return output
 
-# ------------------------------------
-# execute command for a bunch of files
-# ------------------------------------
+# ==================================================================================================
+# main program
+# ==================================================================================================
 
-def exec_batch(cmd,**args):
-  r'''
-Execute a command for all files. The command should be of the following
-structure:
+# parse command line options / set defaults
+# -----------------------------------------
 
-```python
-cmd = "EXECUTABLE OPTIONS {src_dir:s}/{fmt:s} {new_dir:s}/{new_fmt:s}"
-```
+# parse command-line options/arguments
+args = docopt(__doc__,version='0.0.1')
 
-This function will create the `new_dir` if needed. It then loops over indices
-`i` and `j` and replace `fmt%i` with the lowest possible combination of `i` and
-`new_fmt%j` with `j = 1 .. len(files)`.
+# rename/set options (some names filled below, included here only to give an overview)
+files          = [os.path.abspath(f) for f in args['<image>']]
+verbose        = args['--verbose']
+time           = float(args['--time'])
+frame_rate     = args['--frame-rate'] if args['--frame-rate'] is not None else float(len(files))/time
+flatten        = args['--flatten']
+trim           = args['--trim']
+set_background = True                 if args['--background'] is not None else False
+background     = args['--background'] if args['--background'] is not None else 'white'
+platform       = None
+temp_dir       = os.path.abspath(args['--temp-dir']) if args['--temp-dir'] is not None else None
+output         = os.path.abspath(args['--output'  ]) if args['--output'  ] is not None else None
+fmt            = None
 
-Arguments
+# check if all the input-files exist
+for name in files:
+  if not os.path.isfile(name):
+    raise IOError('"%s" does not exist'%name); sys.exit(1)
 
--   *cmd (`<str>`)*
-    Command (see above).
+# set temporary directory
+if temp_dir is None: temp_dir = tempfile.gettempdir()
+else               : exec_cmd('mkdir '+temp_dir,verbose=verbose)
 
-Options
+# platform
+if   sys.platform.startswith('linux' ) : platform = 'linux'
+elif sys.platform.startswith('darwin') : platform = 'mac'
 
--   *args (`<dict>`)*
-    Each of the substitutions to apply in the print format, as named arguments.
+# set default extension for the output
+if output:
+  if len(os.path.splitext(output)[1]) == 0:
+    output += '.mp4'
 
-Returns
+# interpret input
+# ---------------
 
--   *args (`<dict>`)*
-    Argument with substitutions made.
+# return the common prefix of two strings
+def commonprefix(s1,s2):
+  for i, c in enumerate(s1):
+    if c != s2[i]:
+      return s1[:i]
+  return s1
 
--   *output*
-    Output of the command.
-  '''
+# return the common suffix of two strings
+def commonsuffix(s1,s2):
+  for i, c in enumerate(s1[::-1]):
+    if c != s2[len(s2)-i-1]:
+      return s1[len(s1)-i:]
+  return s1
 
-  if 'new_dir' in args:
-    if not os.path.isdir(args['new_dir']):
-      exec_cmd('mkdir "{new_dir:s}"',**args)
+# get common prefix and suffix from all stings
+# - initialize
+pre = files[0]
+suf = files[0]
+# - loop over all files
+for fname in files[1:]:
+  pre = commonprefix(pre,fname)
+  suf = commonsuffix(suf,fname)
+# - remove zero-padding
+try:
+  while pre[-1]=='0':
+    pre = pre[:-1]
+except:
+  raise IOError('ambiguous input, cannot proceed')
 
-  files   = []
-  output  = []
-  fmt     = args.pop('fmt')
-  new_fmt = args.pop('new_fmt',fmt)
-
-  j = 0
-  i = 0
-  while True:
-    if fmt%j in args['files']:
-      i      += 1
-      files  += [new_fmt%i]
-      output += [exec_cmd(cmd,fmt=fmt%j,new_fmt=new_fmt%i,**args)]
-    j += 1
-    if len(files)==len(args['files']): break
-
-  args['fmt'    ] = new_fmt
-  args['files'  ] = files
-  args['src_dir'] = args.pop('new_dir',args['src_dir'])
-
-  return args,output
-
-# ==============================================================================
-# default options
-# ==============================================================================
-
-def cli():
-  r'''
-Parse command-line arguments and options, convert them to a dictionary and
-set some defaults. The dictionary consists of the following fields:
-
-| key            | description                                         |
-| -------------- | --------------------------------------------------- |
-| frame_rate     | frame-rate                                          |
-| output         | name of of the movie                                |
-| set_background | signal to enforce the background color              |
-| background     | (default) background color                          |
-| files          | list with files to convert                          |
-| fmt            | print format of the files                           |
-| platform       | platform on which the command is run                |
-| base_dir       | base directory (from which the command is executed) |
-| temp_dir       | temporary directory                                 |
-| src_dir        | directory to extract the files from                 |
-| clean          | signal to remove the temporary directory            |
-
-Returns
-
--   *parser (`<argparse.ArgumentParser>`)*
-    The parser used for the command-line interaction: used to raise errors.
-
--   *args (`<dict>`)*
-    The dictionary with arguments/options.
-  '''
-
-  # parse command-line arguments/options
-  # ------------------------------------
-
-  # set options/arguments
-  opts = [\
-    (('-h','--help'         ),dict(action='store_true'               )),
-    (('-v','--version'      ),dict(action='store_true'               )),
-    (('-o','--output'       ),dict(type=str                          )),
-    (('-r','--frame-rate'   ),dict(type=float                        )),
-    (('-t','--time'         ),dict(type=float                        )),
-    ((     '--temp-dir'     ),dict(type=str                          )),
-    ((     '--background'   ),dict(type=str                          )),
-    ((     '--trim'         ),dict(action='store_true'               )),
-    ((     '--flatten'      ),dict(action='store_true'               )),
-    ((     '--verbose'      ),dict(action='store_true'               )),
-    (('files'               ),dict(nargs='*',type=str,metavar='IMAGE')),
-  ]
-
-  # parse command-line arguments
-  # - create parser
-  parser = argparse.ArgumentParser(add_help=False)
-  for (arg,opt) in opts:
-    if type(arg)==tuple: parser.add_argument(*arg,**opt)
-    else               : parser.add_argument( arg,**opt)
-  # - catch help
-  if len(sys.argv)==1: parser.error('No arguments found')
-  if sys.argv[1] in ['-h','--help'   ]: printhelp   (parser)
-  if sys.argv[1] in [     '--version']: printversion(parser)
-  # - execute parser / convert to "<dict>"
-  args = vars(parser.parse_args())
-  # - print help and exit
-  if args['help'   ]: printhelp   (parser)
-  if args['version']: printversion(parser)
-  # - remove None arguments (to simplify implementation below)
-  rm = [key for key in args if args[key] is None or key in ['help','version']]
-  for key in rm:
-    del args[key]
-  # - option exclusivity
-  if 'background' in args and args['flatten']:
-    parser.error('"flatten" does not allow "background" specification')
-  if 'time' in args and 'frame_rate' in args:
-    parser.error('"time" does not allow "frame-rate" specification')
-
-  # define names for the output
-  # ---------------------------
-
-  # get command-line options
-  output   = args.pop('output'  ,None)
-  temp_dir = args.pop('temp_dir',None)
-  files    = args.pop('files'        )
-  clean    = False
-  name     = os.path.splitext(os.path.basename(sys.argv[0]))[0]
-
-  # platform / default extension
-  if   sys.platform.startswith('linux'):
-    platform = 'linux'
-    ext      = '.mp4'
-  elif sys.platform.startswith('darwin'):
-    platform = 'darwin'
-    ext      = '.mov'
-  else:
-    parser.error('Platform unknown')
-
-  # output name: default extension
-  if output is not None:
-    if len(os.path.splitext(output)[1])==0:
-      output = '{output:s}{ext:s}'.format(ext=ext,output=output)
-      output = os.path.abspath(output)
-
-  # temporary directory
-  if temp_dir is None:
-    clean    = True
-    n        = 0
-    temp_dir = '{name:s}-temp'.format(name=name)
-    while True:
-      if not os.path.isdir(temp_dir): break
-      n       += 1
-      temp_dir = '{name:s}-temp-{n:d}'.format(n=n,name=name)
-
-  # interpret input
-  # ---------------
-
-  # basic check
-  for fname in files:
-    if not os.path.isfile(fname):
-      parser.error('File "%s" does not exist'%fname)
-  if len(files)<2:
-    parser.error('Insufficient images to proceed')
-
-  # return the common prefix of two strings
-  def commonprefix(s1,s2):
-    for i, c in enumerate(s1):
-      if c != s2[i]:
-        return s1[:i]
-    return s1
-
-  # return the common suffix of two strings
-  def commonsuffix(s1,s2):
-    for i, c in enumerate(s1[::-1]):
-      if c != s2[len(s2)-i-1]:
-        return s1[len(s1)-i:]
-    return s1
-
-  # get common pre- and suffix from all stings
-  # - initialize
-  pre = commonprefix(files[0],files[1])
-  suf = commonsuffix(files[0],files[1])
-  # - loop over all files
-  for fname in files[1:]:
-    pre = commonprefix(pre,fname)
-    suf = commonsuffix(suf,fname)
-  # - remove zero-padding
+# check if zero-padding was used
+# - initialize
+pad  = False
+n    = 0
+imax = 0
+# - loop over all files
+for fname in files:
   try:
-    while pre[-1]=='0':
-      pre = pre[:-1]
+    i    = fname.split(pre)[1].split(suf)[0]
+    pad  = max(pad ,len(i)!=len('{0:d}'.format(int(i))))
+    n    = max(n   ,len(i))
+    imax = max(imax,int(i))
   except:
-    parser.error('ambiguous input, cannot proceed')
-
-  # check if zero-padding was used
-  # - initialize
-  pad  = False
-  n    = 0
-  imax = 0
-  # - loop over all files
+    raise IOError('ambiguous input, cannot proceed')
+# - check consistency: if padding is applied, it must be applied to all
+if pad:
   for fname in files:
-    try :
-      i    = fname.split(pre)[1].split(suf)[0]
-      pad  = max(pad ,len(i)!=len('{0:d}'.format(int(i))))
-      n    = max(n   ,len(i))
-      imax = max(imax,int(i))
-    except:
-      parser.error('ambiguous input, cannot proceed')
-  # - check consistency: if padding is applied, it must be applied to all
-  if pad:
-    for fname in files:
-      if not len(fname.split(pre)[1].split(suf)[0])==n:
-        parser.error('ambiguous input, cannot proceed')
+    if not len(fname.split(pre)[1].split(suf)[0])==n:
+      raise IOError('ambiguous input, cannot proceed')
 
-  # set FMT based on information extracted above
-  fmt = ''
-  if pad: fmt = '0'+str(n)
-  fmt = pre+'%'+fmt+'d'+suf
+# set FMT based on information extracted above
+if pad: fmt = pre + '%0d' + suf
+else  : fmt = pre + '%d'  + suf
 
-  # set default options: movie / image conversion
-  # ---------------------------------------------
+# copy/rename input files to temp_dir
+# -----------------------------------
 
-  args.setdefault('time'          , 20.                                     )
-  args.setdefault('frame_rate'    , float(len(files))/args['time']          )
-  args.setdefault('set_background', True if 'background' in args else False )
-  args.setdefault('background'    , 'white'                                 )
-  args.setdefault('platform'      , platform                                )
-  args.setdefault('files'         , [os.path.relpath(f) for f in files]     )
-  args.setdefault('temp_dir'      , os.path.abspath(temp_dir)               )
-  args.setdefault('base_dir'      , os.path.abspath(os.getcwd())            )
-  args.setdefault('src_dir'       , os.path.abspath(os.getcwd())            )
-  args.setdefault('output'        , output                                  )
-  args.setdefault('files'         , files                                   )
-  args.setdefault('clean'         , clean                                   )
-  args.setdefault('fmt'           , fmt                                     )
+old = []
+i   = 0
 
-  return parser,args
+while len(old) != len(files):
+  if os.path.exists(fmt%i): old += [fmt%i]
+  i += 1
 
-# ==============================================================================
-# interpret how to read the files / how to convert to consecutive numbered files
-# ==============================================================================
+new = [(temp_dir+'/image%0d'+suf)%j for j in range(len(old))]
 
-def renumber(parser,**args):
+for i,j in zip(old,new):
+  exec_cmd('cp %s %s'%(i,j),verbose=verbose)
 
-  fmt    = args['fmt'  ]
-  files  = args['files']
+files = new
+fmt   = temp_dir+'/image%0d'+suf
 
-  n      = sum([1 for i in range(1,len(files)+1) if fmt%i in files])
-  renum  = False if n==len(files) else True
+# convert SVG -> PNG, if needed
+# -----------------------------
 
-  if len(os.path.dirname(fmt))==0 and not renum:
-    return args
+if os.path.splitext(files[0])[1].lower() == '.svg':
 
-  pre     = os.path.dirname(os.path.commonprefix(files))
-  new_fmt = fmt if len(pre)==0 else fmt.split(pre+'/',1)[1]
-  new_fmt = 'renum_'+new_fmt.replace('/','_')
-  cmd     = 'cp {src_dir:s}/{fmt:s} {new_dir}/{new_fmt:s}'
-  args,_  = exec_batch(cmd,new_fmt=new_fmt,new_dir=args['temp_dir'],**args)
+  if not shutil.which('rsvg-convert'):
+    raise IOError('"rsvg-convert" not found, please convert SVG files to PNG files manually')
 
-  return args
+  for file in files:
 
-# ==============================================================================
-# convert SVG -> PNG
-# ==============================================================================
+    exec_cmd('rsvg-convert -b {background:s} "{old:s}" -o "{new:s}"'.format(
+      background = background,
+      old        = file,
+      new        = os.path.splitext(file)[0] + '.png'
+    ),verbose=verbose)
 
-def svg2png(parser,**args):
+  files          = [os.path.splitext(file)[0] + '.png' for file in files]
+  fmt            =  os.path.splitext(fmt )[0] + '.png'
+  flatten        = False
+  set_background = False
 
-  if os.path.splitext(args['fmt'])[1].lower()!='.svg':
-    return args
+# trim, if needed
+# ---------------
 
-  if not which('rsvg-convert'):
-    parser.error('"rsvg-convert" not found, please convert SVG files to PNG files manually')
+if trim:
 
-  cmd     = 'rsvg-convert -b {background:s} "{src_dir:s}/{fmt:s}" -o "{new_dir:s}/{new_fmt:s}"'
-  new_fmt = 'png_'+os.path.splitext(args['fmt'])[0]+'.png'
-  args,_  = exec_batch(cmd,new_fmt=new_fmt,new_dir=args['temp_dir'],**args)
+  if not shutil.which('convert'):
+    raise IOError('"convert" not found, please install ImageMagick')
 
-  args['flatten'       ] = False
-  args['set_background'] = False
+  out = []
 
-  return args
+  for file in files:
 
-# ==============================================================================
-# flatten images
-# ==============================================================================
-
-def flatten(parser,**args):
-
-  if not args['flatten']:
-    return args
-
-  if not which('convert'):
-    parser.error('"convert" not found, please install ImageMagick')
-
-  cmd     = 'convert -flatten "{src_dir:s}/{fmt:s}" "{new_dir:s}/{new_fmt:s}"'
-  new_fmt = 'flat_'+args['fmt']
-  args,_  = exec_batch(cmd,new_fmt=new_fmt,new_dir=args['temp_dir'],**args)
-
-  return args
-
-# ==============================================================================
-# apply background
-# ==============================================================================
-
-def background(parser,**args):
-
-  if not args['set_background']:
-    return args
-
-  if not which('convert'):
-    parser.error('"convert" not found, please install ImageMagick')
-
-  if background!='none':
-    args['background'] += ' -alpha remove'
-
-  cmd     = 'convert -background {background:s} "{src_dir}/{fmt:s}" "{new_dir}/{new_fmt:s}"'
-  new_fmt = 'background_'+args['fmt']
-  args,_  = exec_batch(cmd,new_fmt=new_fmt,new_dir=args['temp_dir'],**args)
-
-  args['background'] = args['background'].replace(' -alpha remove','')
-
-  return args
-
-# ==============================================================================
-# trim images
-# ==============================================================================
-
-def trim(parser,**args):
-
-  if not args['trim']:
-    return args
-
-  if not which('convert'):
-    parser.error('"convert" not found, please install ImageMagick')
-
-  # select dimensions
-  # -----------------
-
-  # run convert once to apply the auto-trim feature
-  new_fmt  = 'trim_'+args['fmt']
-  cmd      = 'convert -trim -verbose "{src_dir}/{fmt:s}" "{new_dir:s}/{new_fmt:s}"'
-  _,out    = exec_batch(cmd,new_fmt=new_fmt,new_dir=args['temp_dir'],**args)
+    out += [exec_cmd('convert -trim -verbose  "{old:s}" "{new:s}"'.format(
+      old = file,
+      new = temp_dir + '/tmp.png'
+    ),verbose=verbose)]
 
   # read dimensions from convert output
   split = lambda txt: re.split('([0-9]*)(x)([0-9]*)(\ )([0-9]*)(x)([0-9]*)([\+][0-9]*)([\+][0-9]*)(.*)',txt)
@@ -538,9 +215,8 @@ def trim(parser,**args):
   x     = [int(split(o)[8]) for o in out] # horizontal position at which the trimmed image starts
   y     = [int(split(o)[9]) for o in out] # vertical   position at which the trimmed image starts
 
-  # WIP: find out more if we need this
-  # if min(w0)!=max(w0) or min(h0)!=max(h0):
-  #   parser.error('Image size not consistent')
+  if min(w0)!=max(w0) or min(h0)!=max(h0):
+    raise IOError('Image size not consistent')
 
   # select crop dimensions
   dim      = {}
@@ -549,66 +225,69 @@ def trim(parser,**args):
   dim['x'] = min(x)
   dim['y'] = min(y)
 
-  # trim images
-  # -----------
+  opt  = ['-crop {w:d}x{h:d}{x:+d}{y:+d}'.format(**dim)]
+  opt += ['-background %s'%background]
+  if background != 'none': opt += ['-alpha remove']
+  if flatten             : opt += ['-flatten']
 
-  if background!='none':
-    args['background'] += ' -alpha remove'
+  for file in files:
 
-  cmd    = 'convert -crop {w:d}x{h:d}{x:+d}{y:+d} -background {background:s} "{src_dir}/{fmt:s}" "{new_dir:s}/{new_fmt:s}"'
-  args,_ = exec_batch(cmd,new_fmt=new_fmt,new_dir=args['temp_dir'],**args,**dim)
+    exec_cmd('convert {options:s} "{old:s}" "{new:s}"'.format(
+      options = ' '.join(opt),
+      old     = file,
+      new     = temp_dir + '/tmp.png'
+    ),verbose=verbose)
 
-  # overwrite options that have been applied
-  args['set_background'] = False
-  args['background'    ] = args['background'].replace(' -alpha remove','')
+    exec_cmd('mv "%s" "%s"'%(temp_dir + '/tmp.png',file),verbose=verbose)
 
-  return args
+  set_background = False
+  flatten        = False
 
-# ==============================================================================
-# make movie
-# ==============================================================================
+# flatten file, if needed
+# -----------------------
 
-def movie(parser,**args):
+if flatten or set_background:
 
-  if args['output'] is None:
-    return args
+  if not shutil.which('convert'):
+    raise IOError('"convert" not found, please install ImageMagick')
 
-  if not which('ffmpeg'):
-    parser.error('"ffmpeg" not found, please install ImageMagick')
+  opt = []
 
-  if   args['platform'] == 'linux' :
-    cmd = 'ffmpeg -r {frame_rate:f} -i "{fmt:s}" "{output:s}"'.format(**args)
-  elif args['platform'] == 'darwin':
-    cmd = 'ffmpeg -r {frame_rate:f} -vsync 1 -f image2 -i "{fmt:s}" -vcodec copy "{output:s}"'.format(**args)
+  if flatten                                : opt += ['-flatten']
+  if set_background                         : opt += ['-background %s'%background]
+  if set_background and background != 'none': opt += ['-alpha remove']
 
-  if os.path.isfile(args['output']): exec_cmd('rm "{output:s}"',**args)
-  exec_cmd('cd "{src_dir:s}"; '+cmd,**args)
+  for file in files:
 
-  return args
+    exec_cmd('convert {options:s} "{old:s}" "{new:s}"'.format(
+      options = ' '.join(opt),
+      old     = file,
+      new     = temp_dir + '/tmp.png'
+    ),verbose=verbose)
 
-# ==============================================================================
-# main program
-# ==============================================================================
+    exec_cmd('mv "%s" "%s"'%(temp_dir + '/tmp.png',file),verbose=verbose)
 
-if __name__=='__main__':
+# make movie, if needed
+# ---------------------
 
-  # read command-line options/argument + set defaults
-  parser,args = cli()
+if output:
 
-  # print abbreviations to the screen
-  if args['verbose']:
-    print('base_dir="{base_dir:s}"'.format(**args))
-    print('temp_dir="{temp_dir:s}"'.format(**args))
+  if not shutil.which('ffmpeg'):
+    raise IOError('"ffmpeg" not found, please install ImageMagick')
 
-  # convert images (if needed)
-  args = renumber  (parser,**args)
-  args = svg2png   (parser,**args)
-  args = flatten   (parser,**args)
-  args = background(parser,**args)
-  args = trim      (parser,**args)
-  args = movie     (parser,**args)
-
-  # optionally remove temporary directory
-  if args['clean']:
-    if os.path.isdir(args['temp_dir']):
-      exec_cmd('rm -r "{temp_dir:s}"',**args)
+  if   platform == 'linux' :
+    exec_cmd('cd {temp_dir:s}; ffmpeg -r {frame_rate:f} -i "{fmt:s}" "{output:s}"'.format(
+      temp_dir   = temp_dir,
+      frame_rate = frame_rate,
+      fmt        = fmt,
+      output     = 'tmp.mp4',
+    ),verbose=verbose)
+    exec_cmd('mv "%s" "%s"'%(temp_dir+'/tmp.mp4',output))
+  elif platform == 'mac':
+    exec_cmd('cd {temp_dir:s}; ffmpeg -r {frame_rate:f} -vsync 1 -f image2 -i "{fmt:s}" -vcodec copy "{output:s}"'.format(
+      temp_dir   = temp_dir,
+      frame_rate = frame_rate,
+      fmt        = fmt,
+      output     = 'tmp.mp4',
+    ),verbose=verbose)
+    exec_cmd('mv "%s" "%s"'%(temp_dir+'/tmp.mp4',output))
