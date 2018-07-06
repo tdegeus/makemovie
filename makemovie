@@ -12,27 +12,28 @@ Usage:
   makemovie [options] <image>...
 
 Arguments:
-  image                   The images which form the frames of the movie.
+  image                     The images which form the frames of the movie.
 
 Options:
-  -h --help               Show help.
-  --version               Show version.
-  -v --verbose            Print all executed commands.
-  -o --output=<str>       Filename of the output movie.
-  -t --time=<float>       Fix total time of the movie [default: 20].
-  -r --frame-rate=<float> Fix the frame rate (see "ffmpeg"), ignores "--time" option.
-  --background=<str>      Apply a background color (e.g. "none" or "white").
-  --trim                  Trim the images to the smallest size that fits all images.
-  --flatten               Flatten input images: required for transparent PNG-files.
-  --temp-dir=<str>        Output directory for temporary images (all are deleted if not specified).
+  -o, --output=<str>        Filename of the output movie.
+  -t, --time=<float>        Fix total time of the movie [default: 20].
+  -r, --frame-rate=<float>  Fix the frame rate (see "ffmpeg"), ignores "--time" option.
+      --background=<str>    Apply a background color (e.g. "none" or "white").
+      --trim                Trim the images to the smallest size that fits all images.
+      --flatten             Flatten input images: required for transparent PNG-files.
+      --temp-dir=<str>      Output directory for temporary images (deleted if not specified).
+  -v, --verbose             Print all executed commands.
+  -h, --help                Show help.
+      --version             Show version.
 
 (c-MIT) T.W.J. de Geus | tom@geus.me | www.geus.me | github.com/tdegeus
 """
 
 # ==================================================================================================
 
-from subprocess import check_output,STDOUT
+from subprocess import check_output, STDOUT
 from docopt     import docopt
+
 import os,sys,re
 import shutil
 import tempfile
@@ -71,6 +72,7 @@ trim           = args['--trim']
 set_background = True                 if args['--background'] is not None else False
 background     = args['--background'] if args['--background'] is not None else 'white'
 platform       = None
+clean          = False
 temp_dir       = os.path.abspath(args['--temp-dir']) if args['--temp-dir'] is not None else None
 output         = os.path.abspath(args['--output'  ]) if args['--output'  ] is not None else None
 fmt            = None
@@ -81,8 +83,8 @@ for name in files:
     raise IOError('"%s" does not exist'%name); sys.exit(1)
 
 # set temporary directory
-if temp_dir is None: temp_dir = tempfile.gettempdir()
-else               : exec_cmd('mkdir '+temp_dir,verbose=verbose)
+if temp_dir is None              : temp_dir = tempfile.mkdtemp(); clean = True
+elif not os.path.isdir(temp_dir) : exec_cmd('mkdir '+temp_dir,verbose=verbose)
 
 # platform
 if   sys.platform.startswith('linux' ) : platform = 'linux'
@@ -141,13 +143,16 @@ for fname in files:
     raise IOError('ambiguous input, cannot proceed')
 # - check consistency: if padding is applied, it must be applied to all
 if pad:
+  pad = 0
   for fname in files:
+    pad = max(pad,len(fname.split(pre)[1].split(suf)[0]))
     if not len(fname.split(pre)[1].split(suf)[0])==n:
       raise IOError('ambiguous input, cannot proceed')
 
+
 # set FMT based on information extracted above
-if pad: fmt = pre + '%0d' + suf
-else  : fmt = pre + '%d'  + suf
+if pad: fmt = pre + '%0'+str(pad)+'d' + suf
+else  : fmt = pre + '%d'              + suf
 
 # copy/rename input files to temp_dir
 # -----------------------------------
@@ -291,3 +296,9 @@ if output:
       output     = 'tmp.mp4',
     ),verbose=verbose)
     exec_cmd('mv "%s" "%s"'%(temp_dir+'/tmp.mp4',output))
+
+  # remove the temporary directory if needed
+  # ----------------------------------------
+
+  if clean:
+    exec_cmd('rm -r "%s"'%(temp_dir),verbose=verbose)
