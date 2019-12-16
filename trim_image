@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""trim_image
+  Trim a batch of images.
+
+Usage:
+  trim_image [options] <image>...
+
+Arguments:
+  image                     The images to trim.
+
+Options:
+  -a, --append=<str>        Append filenames, if empty the input files are overwritten. [default: ]
+      --background=<str>    Apply a background color (e.g. "none" or "white").
+      --flatten             Flatten input images: required for transparent PNG-files.
+      --temp-dir=<str>      Output directory for temporary images (deleted if not specified).
+  -v, --verbose             Print all executed commands.
+  -h, --help                Show help.
+      --version             Show version.
+
+(c-MIT) T.W.J. de Geus | tom@geus.me | www.geus.me | github.com/tdegeus
+"""
+
+# ==================================================================================================
+
+from subprocess import check_output, STDOUT
+from docopt     import docopt
+
+import os,sys,re
+import shutil
+import tempfile
+
+# ==================================================================================================
+# support functions
+# ==================================================================================================
+
+def exec_cmd(cmd,verbose=False):
+
+  if verbose: print(cmd)
+
+  output = check_output(cmd,shell=True,stderr=STDOUT).decode("utf-8")
+
+  if verbose and len(output)>0: print(output)
+
+  return output
+
+# ==================================================================================================
+# main program
+# ==================================================================================================
+
+# parse command line options / set defaults
+# -----------------------------------------
+
+# parse command-line options/arguments
+args = docopt(__doc__,version='0.0.1')
+
+# rename/set options (some names filled below, included here only to give an overview)
+files          = [os.path.abspath(f) for f in args['<image>']]
+append         = args['--append' ]
+verbose        = args['--verbose']
+flatten        = args['--flatten']
+set_background = True                 if args['--background'] is not None else False
+background     = args['--background'] if args['--background'] is not None else 'white'
+platform       = None
+clean          = False
+temp_dir       = os.path.abspath(args['--temp-dir']) if args['--temp-dir'] is not None else None
+
+# check if all the input-files exist
+for name in files:
+  if not os.path.isfile(name):
+    raise IOError('"%s" does not exist'%name); sys.exit(1)
+
+# set temporary directory
+if temp_dir is None              : temp_dir = tempfile.mkdtemp(); clean = True
+elif not os.path.isdir(temp_dir) : exec_cmd('mkdir '+temp_dir,verbose=verbose)
+
+# platform
+if   sys.platform.startswith('linux' ) : platform = 'linux'
+elif sys.platform.startswith('darwin') : platform = 'mac'
+
+# copy/rename input files to temp_dir
+# -----------------------------------
+
+tmp_files = [os.path.join(temp_dir, os.path.relpath(file)) for file in files]
+
+if not shutil.which('convert'):
+  raise IOError('"convert" not found, please install ImageMagick')
+
+out = []
+
+for file in files:
+
+  out += [exec_cmd('convert -trim -verbose  "{old:s}" "{new:s}"'.format(
+    old = file,
+    new = temp_dir + '/tmp.png'
+  ),verbose=verbose)]
+
+# read dimensions from convert output
+split = lambda txt: re.split('([0-9]*)(x)([0-9]*)(\ )([0-9]*)(x)([0-9]*)([\+][0-9]*)([\+][0-9]*)(.*)',txt)
+out   = [o.split('\n')[1] for o in out]
+w     = [int(split(o)[1]) for o in out] # width  of the original image
+h     = [int(split(o)[3]) for o in out] # height of the original image
+w0    = [int(split(o)[5]) for o in out] # width  of the trimmed image
+h0    = [int(split(o)[7]) for o in out] # height of the trimmed image
+x     = [int(split(o)[8]) for o in out] # horizontal position at which the trimmed image starts
+y     = [int(split(o)[9]) for o in out] # vertical   position at which the trimmed image starts
+
+if min(w0)!=max(w0) or min(h0)!=max(h0):
+  raise IOError('Image size not consistent')
+
+# select crop dimensions
+dim      = {}
+dim['w'] = max(w)+(max(x)-min(x))
+dim['h'] = max(h)+(max(y)-min(y))
+dim['x'] = min(x)
+dim['y'] = min(y)
+
+opt  = ['-crop {w:d}x{h:d}{x:+d}{y:+d}'.format(**dim)]
+opt += ['-background %s'%background]
+if background != 'none': opt += ['-alpha remove']
+if flatten             : opt += ['-flatten']
+
+for (file, tmp_file) in zip(files, tmp_files):
+
+  exec_cmd('convert {options:s} "{old:s}" "{new:s}"'.format(
+    options = ' '.join(opt),
+    old     = file,
+    new     = tmp_file,
+  ),verbose=verbose)
+
+  if append:
+    base, ext = os.path.splitext(file)
+    exec_cmd('mv "%s" "%s%s%s"'%(tmp_file, base, append, ext), verbose=verbose)
+  else:
+    exec_cmd('mv "%s" "%s"'%(tmp_file, file), verbose=verbose)
+
