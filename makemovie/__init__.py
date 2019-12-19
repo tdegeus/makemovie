@@ -13,6 +13,9 @@ __version__ = '0.1.0'
 
 
 def _exec(cmd, verbose = False):
+    r'''
+Execute command and return output.
+    '''
 
     if verbose:
         print(cmd)
@@ -27,6 +30,9 @@ def _exec(cmd, verbose = False):
 
 
 def _mkdir(dirname, verbose = False):
+    r'''
+Make directory if it does not yet exist.
+    '''
 
     if os.path.isdir(dirname):
         return
@@ -39,6 +45,9 @@ def _mkdir(dirname, verbose = False):
 
 
 def _mv(orig, dest, verbose = False):
+    r'''
+Move file from "orig" to "dest".
+    '''
 
     os.rename(orig, dest)
 
@@ -48,6 +57,9 @@ def _mv(orig, dest, verbose = False):
 
 
 def _check_get_abspath(filenames):
+    r'''
+Check if files exist, and return their path as absolute file-paths.
+    '''
 
     if type(filenames) == str:
         filenames = [filenames]
@@ -63,6 +75,10 @@ def _check_get_abspath(filenames):
 
 
 def _make_convert_tempdir(temp_dir = None, verbose = False):
+    r'''
+Make a temporary directory and returns its absolute file-path.
+If not specified a directory-name is automatically generated.
+    '''
 
     if temp_dir is None:
         temp_dir = tempfile.mkdtemp()
@@ -78,13 +94,17 @@ def _make_convert_tempdir(temp_dir = None, verbose = False):
 def _convert(filenames, options, append = None, temp_dir = None, verbose = False):
     r'''
 Run convert on a batch of files.
+
+Options:
+- filenames: list of filenames (assumed to exist)
+- options: the options for the convert command (string)
+- append: if specified the "filenames" are not replaced, but appended (before the extension)
+- temp_dir: temporary directory (assumed to exist)
+- verbose: if true, all commands and output are printed to the screen
     '''
 
     if not which('convert'):
         raise IOError('"convert" not found, please install ImageMagick')
-
-    filenames = _check_get_abspath(filenames)
-    temp_dir = _make_convert_tempdir(temp_dir, verbose)
 
     for filename in filenames:
 
@@ -148,8 +168,6 @@ Trim a batch of files.
     filenames = _check_get_abspath(filenames)
     temp_dir = _make_convert_tempdir(temp_dir, verbose)
 
-    # add options
-
     opt += ['-background {0:s}'.format(background)]
 
     if background != 'none':
@@ -157,8 +175,6 @@ Trim a batch of files.
 
     if flatten:
         opt += ['-flatten']
-
-    # apply to images
 
     _convert(filenames, ' '.join(opt), append, verbose)
 
@@ -242,7 +258,7 @@ Trim a batch of files.
     assert min(w0) == max(w0)
     assert min(h0) == max(h0)
 
-    # select crop dimensions
+    # select crop dimensions, add "convert" options to apply at the same time, and run "convert"
 
     dim = {
         'w': max(w) + (max(x) - min(x)),
@@ -252,8 +268,6 @@ Trim a batch of files.
 
     opt = ['-crop {w:d}x{h:d}{x:+d}{y:+d}'.format(**dim)]
 
-    # add options
-
     opt += ['-background {0:s}'.format(background)]
 
     if background != 'none':
@@ -261,8 +275,6 @@ Trim a batch of files.
 
     if flatten:
         opt += ['-flatten']
-
-    # trim images
 
     _convert(filenames, ' '.join(opt), append, temp_dir, verbose)
 
