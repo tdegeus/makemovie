@@ -73,7 +73,6 @@ before_install:
     fi
 
 install:
-  # Set environment using Conda
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
       MINCONDA_OS=$MINCONDA_LINUX;
     elif [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
@@ -89,16 +88,10 @@ install:
   - conda install -c conda-forge setuptools
   - conda install -c conda-forge pip
   - conda install -c conda-forge docopt
+  - conda install -c conda-forge imagemagick
   - conda install -c conda-forge matplotlib
-  # Install the library
   - python -m pip install .
 
 script:
-  # Run Python example
-  - python examples/python/match.py
-  # Compile and run C++ example
-  - cd examples/cpp
-  - cmake .
-  - make
-  - ./example
+  - python test/trim.py
 
