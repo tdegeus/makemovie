@@ -126,6 +126,46 @@ Options:
 
 
 
+def flatten(
+    filenames,
+    append = False,
+    temp_dir = None,
+    verbose = False):
+    r'''
+Flatten batch of images.
+
+:arguments:
+
+    **filenames** (``<list<str>>``)
+        A list of filenames.
+
+:options:
+
+    **append** (``<str>``)
+        If specified the original images are not overwritten. Rather the filename is
+        appended with the string specified here. Note that this implies that there could be others
+        files that are overwritten.
+
+    **temp_dir** (``<str>``)
+        If specified that directory is used as temporary directory. Otherwise, a directory is
+        automatically selected.
+
+    **verbose** ([``False``] | ``True``)
+        If True, all commands are printed to the standard output.
+    '''
+
+    if not which('convert'):
+        raise IOError('"convert" not found, please install ImageMagick')
+
+    filenames = _check_get_abspath(filenames)
+    temp_dir = _make_convert_tempdir(temp_dir, verbose)
+
+    opt += ['-flatten']
+
+    _convert(filenames, ' '.join(opt), append, verbose)
+
+
+
 def set_background(
     filenames,
     background,
