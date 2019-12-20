@@ -30,3 +30,7 @@ makemovie --temp-dir tmp *.png
 makemovie --trim --temp-dir . *.png
 ```
 
+
+
+imagemagick
+rsvg-convert
