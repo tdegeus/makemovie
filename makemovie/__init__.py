@@ -1,15 +1,12 @@
 
+__version__ = '0.1.0'
+
 import tempfile
 import os
 import re
 
 from subprocess import check_output, STDOUT
 from shutil import which
-
-
-
-__version__ = '0.1.0'
-
 
 
 def _exec(cmd, verbose = False):
@@ -28,7 +25,6 @@ Execute command and return output.
     return output
 
 
-
 def _mkdir(dirname, verbose = False):
     r'''
 Make directory if it does not yet exist.
@@ -43,7 +39,6 @@ Make directory if it does not yet exist.
         print('mkdir {0:s}'.format(dirname))
 
 
-
 def _mv(orig, dest, verbose = False):
     r'''
 Move file from "orig" to "dest".
@@ -53,7 +48,6 @@ Move file from "orig" to "dest".
 
     if verbose:
         print('mv {0:s} {1:s}'.format(orig, dest))
-
 
 
 def _check_get_abspath(filenames):
@@ -73,7 +67,6 @@ Check if files exist, and return their path as absolute file-paths.
     return filenames
 
 
-
 def _make_convert_tempdir(temp_dir = None, verbose = False):
     r'''
 Make a temporary directory and returns its absolute file-path.
@@ -88,7 +81,6 @@ If not specified a directory-name is automatically generated.
     _mkdir(temp_dir, verbose)
 
     return temp_dir
-
 
 
 def _convert(filenames, options, append = None, temp_dir = None, verbose = False):
@@ -125,12 +117,11 @@ Options:
         _mv(temp_file, dest, verbose)
 
 
-
 def flatten(
-    filenames,
-    append = False,
-    temp_dir = None,
-    verbose = False):
+        filenames,
+        append = False,
+        temp_dir = None,
+        verbose = False):
     r'''
 Flatten batch of images.
 
@@ -165,14 +156,13 @@ Flatten batch of images.
     _convert(filenames, ' '.join(opt), append, verbose)
 
 
-
 def set_background(
-    filenames,
-    background,
-    flatten = False,
-    append = False,
-    temp_dir = None,
-    verbose = False):
+        filenames,
+        background,
+        flatten = False,
+        append = False,
+        temp_dir = None,
+        verbose = False):
     r'''
 Trim a batch of files.
 
@@ -219,14 +209,13 @@ Trim a batch of files.
     _convert(filenames, ' '.join(opt), append, verbose)
 
 
-
 def trim(
-    filenames,
-    background = 'none',
-    flatten = False,
-    append = False,
-    temp_dir = None,
-    verbose = False):
+        filenames,
+        background = 'none',
+        flatten = False,
+        append = False,
+        temp_dir = None,
+        verbose = False):
     r'''
 Trim a batch of files.
 
@@ -319,12 +308,11 @@ Trim a batch of files.
     _convert(filenames, ' '.join(opt), append, temp_dir, verbose)
 
 
-
 def rsvg_convert(
-    filenames,
-    background = 'none',
-    ext = '.png',
-    verbose = False):
+        filenames,
+        background = 'none',
+        ext = '.png',
+        verbose = False):
     r'''
 Convert SVG images.
 
@@ -367,5 +355,4 @@ Convert SVG images.
             verbose = verbose)
 
     return out
-
 
